@@ -1,16 +1,11 @@
-.data
-num1:   .word 15          
-num2:   .word 5          
-result: .space 4         
+# A simple decrementing loop
+addi $1, $0, 10       # Initialize counter in $1 to 10
+addi $2, $0, 0        # Initialize loop counter in $2 to 0
 
-.text
+loop: 
+beq $1, $0, end # If $1 (counter) is 0, exit the loop
+addi $2, $2, 1  # Increment loop counter $2
+addi $1, $1, -1 # Decrement counter $1
+j loop          # Jump back to the beginning of the loop
 
-main:
-    lw $t0, num1         
-    lw $t1, num2          
-    add $t2, $t0, $t1     
-    sw $t2, result        
-    sub $t3, $t0, $t1      
-    sw $t3, result+4       
-
-   
+end:                  # End of the loop
