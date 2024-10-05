@@ -1,35 +1,31 @@
-
 .data
-N:      .word 10         # The number up to which we will sum
-sum:    .word 0          # To store the final result
-newline: .asciiz "\n"    # For formatting output
-
 .text
+
 main:
-    lw $t0, N             # Load N into $t0
-    li $t1, 0             # Initialize sum to 0 in $t1
-    li $t2, 1             # Initialize counter to 1 in $t2
+    li $a0, 5            # Load the number 5 into $a0
+    jal factorial        # Call the factorial function
+    add $a0, $v0, $zero  # Move the result from $v0 to $a0 for printing
+    li $v0, 1            # Syscall code for print integer
+    syscall              # Print the integer
+    li $v0, 10           # Syscall code for exit
+    syscall              # Exit the program
 
-loop:
-    slt $t3, $t0, $t2     # $t3 = 1 if $t0 < $t2
-    bne $t3, $zero, exit  # If $t3 != 0 (i.e., N < counter), exit loop
-    add $t1, $t1, $t2     # sum = sum + counter
-    addi $t2, $t2, 1      # counter = counter + 1
-    j loop                # Jump back to loop condition
+factorial:
+    addi $sp, $sp, -8    # Create a new stack frame
+    sw $ra, 4($sp)       # Save $ra on the stack
+    sw $a0, 0($sp)       # Save $a0 (n) on the stack
+    li $t0, 0            # Load 0 into $t0
+    beq $a0, $t0, base_case  # If n == 0, branch to base_case
+    addi $a0, $a0, -1    # Decrement n by 1
+    jal factorial        # Recursive call to factorial(n - 1)
+    lw $a0, 0($sp)       # Restore n from the stack
+    mul $v0, $v0, $a0    # Multiply $v0 by n
+    j end_factorial      # Jump to end_factorial to skip base_case
 
-exit:
-    sw  $t1, sum          # Store the sum in memory
+base_case:
+    li $v0, 1            # Base case: factorial(0) = 1
 
-    # Print the sum
-    li  $v0, 1            # Syscall code for print integer
-    add $a0, $t1, $zero   # Move sum into $a0 for printing
-    syscall               # Print the sum
-
-    # Print newline for formatting
-    li  $v0, 4            # Syscall code for print string
-    la  $a0, newline      # Load address of newline into $a0
-    syscall               # Print the newline
-
-    # Exit program
-    li  $v0, 10           # Syscall code for exit
-    syscall
+end_factorial:
+    lw $ra, 4($sp)       # Restore $ra from the stack
+    addi $sp, $sp, 8     # Restore the stack pointer
+    jr $ra               # Return to the caller
