@@ -1,6 +1,5 @@
 import re
 
-# Register mapping from names to numbers
 reg_map = {
     'zero': 0, 'at': 1,
     'v0': 2,  'v1': 3,
@@ -377,163 +376,170 @@ def run_simulation(parsed_instructions, labels, memory):
 
     # Convert the instructions_list to a dictionary for easy PC lookup
     inD = {pc: (inst, mc) for inst, mc, pc in instructions_list}
+    with open("binary_code.txt", "w") as bin_file:
+        while pc in inD:
+            current_instruction, mc = inD[pc]
+            parts = re.split(r'[,\s()]+', current_instruction)
+            parts = [p for p in parts if p]  # Remove empty strings
+            op_code = parts[0]
 
-    while pc in inD:
-        current_instruction, mc = inD[pc]
-        parts = re.split(r'[,\s()]+', current_instruction)
-        parts = [p for p in parts if p]  # Remove empty strings
-        op_code = parts[0]
+            # Generate control signals
+            try:
+                control_signals = generate_control_signals(op_code)
+            except ValueError as e:
+                print(f"Error: {e}")
+                break
 
-        # Generate control signals
-        try:
-            control_signals = generate_control_signals(op_code)
-        except ValueError as e:
-            print(f"Error: {e}")
-            break
+            if single_step:
+                print("\n" + "=" * 80)
+                print("Executing Instruction:")
+                print("Assembly Code:", current_instruction)
+                if mc:
+                    print("Machine Code:", mc)
+                else:
+                    print("Machine Code: N/A")
+                print("PC before execution:", pc)
+                print("Control Signals:", control_signals)
 
-        if single_step:
-            print("\n" + "=" * 80)
-            print("Executing Instruction:")
-            print("Assembly Code:", current_instruction)
             if mc:
-                print("Machine Code:", mc)
-            else:
-                print("Machine Code: N/A")
-            print("PC before execution:", pc)
-            print("Control Signals:", control_signals)
+                if isinstance(mc, list):
+                    for instruction in mc:
+                        bin_file.write(f"{instruction}\n")
+                else:
+                    bin_file.write(f"{mc}\n")
 
-        try:
-            # Handle syscall separately
-            if op_code == 'syscall':
-                if not syscall(reg, memory):
-                    break
-            elif control_signals['Jump']:
-                if op_code == 'j' or op_code == 'jal':
-                    label = parts[1]
-                    if label in labels:
-                        if op_code == 'jal':
-                            reg['ra'] = pc + 4  # Save return address
+            try:
+                # Handle syscall separately
+                if op_code == 'syscall':
+                    if not syscall(reg, memory):
+                        break
+                elif control_signals['Jump']:
+                    if op_code == 'j' or op_code == 'jal':
+                        label = parts[1]
+                        if label in labels:
+                            if op_code == 'jal':
+                                reg['ra'] = pc + 4  # Save return address
+                            pc = labels[label]
+                            continue
+                        else:
+                            raise ValueError(f"Label {label} not found")
+                    elif op_code == 'jr':
+                        rs_name = get_register_name(get_register_number(parts[1]))
+                        pc = reg[rs_name]
+                        continue
+                elif control_signals['Branch']:
+                    rs_name = get_register_name(get_register_number(parts[1]))
+                    rt_name = get_register_name(get_register_number(parts[2]))
+                    label = parts[3]
+                    if op_code == 'beq' and reg[rs_name] == reg[rt_name]:
                         pc = labels[label]
                         continue
-                    else:
-                        raise ValueError(f"Label {label} not found")
-                elif op_code == 'jr':
-                    rs_name = get_register_name(get_register_number(parts[1]))
-                    pc = reg[rs_name]
-                    continue
-            elif control_signals['Branch']:
-                rs_name = get_register_name(get_register_number(parts[1]))
-                rt_name = get_register_name(get_register_number(parts[2]))
-                label = parts[3]
-                if op_code == 'beq' and reg[rs_name] == reg[rt_name]:
-                    pc = labels[label]
-                    continue
-                elif op_code == 'bne' and reg[rs_name] != reg[rt_name]:
-                    pc = labels[label]
-                    continue
-            else:
-                ALU_result = 0
-                if control_signals['ALUSrc']:
-                    if op_code in ['addi', 'andi', 'ori']:
-                        rt_name = get_register_name(get_register_number(parts[1]))
-                        rs_name = get_register_name(get_register_number(parts[2]))
-                        imm = int(parts[3])
-                        if op_code == 'addi':
-                            ALU_result = reg[rs_name] + imm
-                        elif op_code == 'andi':
-                            ALU_result = reg[rs_name] & imm
-                        elif op_code == 'ori':
-                            ALU_result = reg[rs_name] | imm
-                        if control_signals['RegWrite']:
-                            reg[rt_name] = ALU_result
-                    elif op_code == 'lui':
-                        rt_name = get_register_name(get_register_number(parts[1]))
-                        imm = int(parts[2])
-                        if control_signals['RegWrite']:
-                            reg[rt_name] = imm << 16
-                    elif op_code == 'li':
-                        rd_name = get_register_name(get_register_number(parts[1]))
-                        imm = int(parts[2])
-                        if control_signals['RegWrite']:
-                            reg[rd_name] = imm
-                    elif op_code == 'lw':
-                        rt_name = get_register_name(get_register_number(parts[1]))
-                        if len(parts) == 4:
-                            offset = int(parts[2])
-                            base_name = get_register_name(get_register_number(parts[3]))
-                            address = reg[base_name] + offset
-                        elif len(parts) == 3:
-                            # lw rt, label
-                            label = parts[2]
-                            address = labels.get(label)
-                            if address is None:
-                                raise ValueError(f"Label {label} not found")
-                        else:
-                            raise ValueError("Invalid lw instruction format")
-                        if control_signals['MemRead']:
-                            data = memory.get(address, 0)
-                            if control_signals['RegWrite']:
-                                reg[rt_name] = data
-                    elif op_code == 'sw':
-                        rt_name = get_register_name(get_register_number(parts[1]))
-                        if len(parts) == 4:
-                            offset = int(parts[2])
-                            base_name = get_register_name(get_register_number(parts[3]))
-                            address = reg[base_name] + offset
-                        elif len(parts) == 3:
-                            label = parts[2]
-                            address = labels.get(label)
-                            if address is None:
-                                raise ValueError(f"Label {label} not found")
-                        else:
-                            raise ValueError("Invalid sw instruction format")
-                        if control_signals['MemWrite']:
-                            memory[address] = reg[rt_name]
+                    elif op_code == 'bne' and reg[rs_name] != reg[rt_name]:
+                        pc = labels[label]
+                        continue
                 else:
-                    # ALU operations with register operands
-                    rd_name = get_register_name(get_register_number(parts[1]))
-                    rs_name = get_register_name(get_register_number(parts[2]))
-                    rt_name = get_register_name(get_register_number(parts[3]))
-                    if op_code == 'add':
-                        ALU_result = reg[rs_name] + reg[rt_name]
-                    elif op_code == 'sub':
-                        ALU_result = reg[rs_name] - reg[rt_name]
-                    elif op_code == 'and':
-                        ALU_result = reg[rs_name] & reg[rt_name]
-                    elif op_code == 'or':
-                        ALU_result = reg[rs_name] | reg[rt_name]
-                    elif op_code == 'slt':
-                        ALU_result = 1 if reg[rs_name] < reg[rt_name] else 0
-                    elif op_code == 'mul':
-                        ALU_result = reg[rs_name] * reg[rt_name]
-                    elif op_code == 'xor':
-                        ALU_result = reg[rs_name] ^ reg[rt_name]
-                    elif op_code == 'nor':
-                        ALU_result = ~(reg[rs_name] | reg[rt_name])
-                    elif op_code == 'sll':
-                        rt_name = get_register_name(get_register_number(parts[2]))
-                        shamt = int(parts[3])
-                        ALU_result = reg[rt_name] << shamt
-                    elif op_code == 'srl':
-                        rt_name = get_register_name(get_register_number(parts[2]))
-                        shamt = int(parts[3])
-                        ALU_result = reg[rt_name] >> shamt
+                    ALU_result = 0
+                    if control_signals['ALUSrc']:
+                        if op_code in ['addi', 'andi', 'ori']:
+                            rt_name = get_register_name(get_register_number(parts[1]))
+                            rs_name = get_register_name(get_register_number(parts[2]))
+                            imm = int(parts[3])
+                            if op_code == 'addi':
+                                ALU_result = reg[rs_name] + imm
+                            elif op_code == 'andi':
+                                ALU_result = reg[rs_name] & imm
+                            elif op_code == 'ori':
+                                ALU_result = reg[rs_name] | imm
+                            if control_signals['RegWrite']:
+                                reg[rt_name] = ALU_result
+                        elif op_code == 'lui':
+                            rt_name = get_register_name(get_register_number(parts[1]))
+                            imm = int(parts[2])
+                            if control_signals['RegWrite']:
+                                reg[rt_name] = imm << 16
+                        elif op_code == 'li':
+                            rd_name = get_register_name(get_register_number(parts[1]))
+                            imm = int(parts[2])
+                            if control_signals['RegWrite']:
+                                reg[rd_name] = imm
+                        elif op_code == 'lw':
+                            rt_name = get_register_name(get_register_number(parts[1]))
+                            if len(parts) == 4:
+                                offset = int(parts[2])
+                                base_name = get_register_name(get_register_number(parts[3]))
+                                address = reg[base_name] + offset
+                            elif len(parts) == 3:
+                                # lw rt, label
+                                label = parts[2]
+                                address = labels.get(label)
+                                if address is None:
+                                    raise ValueError(f"Label {label} not found")
+                            else:
+                                raise ValueError("Invalid lw instruction format")
+                            if control_signals['MemRead']:
+                                data = memory.get(address, 0)
+                                if control_signals['RegWrite']:
+                                    reg[rt_name] = data
+                        elif op_code == 'sw':
+                            rt_name = get_register_name(get_register_number(parts[1]))
+                            if len(parts) == 4:
+                                offset = int(parts[2])
+                                base_name = get_register_name(get_register_number(parts[3]))
+                                address = reg[base_name] + offset
+                            elif len(parts) == 3:
+                                label = parts[2]
+                                address = labels.get(label)
+                                if address is None:
+                                    raise ValueError(f"Label {label} not found")
+                            else:
+                                raise ValueError("Invalid sw instruction format")
+                            if control_signals['MemWrite']:
+                                memory[address] = reg[rt_name]
                     else:
-                        raise ValueError(f"Unsupported ALU operation {op_code}")
-                    if control_signals['RegWrite']:
-                        reg[rd_name] = ALU_result
-        except Exception as e:
-            print(f"Error executing instruction: {current_instruction} -> {e}")
-            break
+                        # ALU operations with register operands
+                        rd_name = get_register_name(get_register_number(parts[1]))
+                        rs_name = get_register_name(get_register_number(parts[2]))
+                        rt_name = get_register_name(get_register_number(parts[3]))
+                        if op_code == 'add':
+                            ALU_result = reg[rs_name] + reg[rt_name]
+                        elif op_code == 'sub':
+                            ALU_result = reg[rs_name] - reg[rt_name]
+                        elif op_code == 'and':
+                            ALU_result = reg[rs_name] & reg[rt_name]
+                        elif op_code == 'or':
+                            ALU_result = reg[rs_name] | reg[rt_name]
+                        elif op_code == 'slt':
+                            ALU_result = 1 if reg[rs_name] < reg[rt_name] else 0
+                        elif op_code == 'mul':
+                            ALU_result = reg[rs_name] * reg[rt_name]
+                        elif op_code == 'xor':
+                            ALU_result = reg[rs_name] ^ reg[rt_name]
+                        elif op_code == 'nor':
+                            ALU_result = ~(reg[rs_name] | reg[rt_name])
+                        elif op_code == 'sll':
+                            rt_name = get_register_name(get_register_number(parts[2]))
+                            shamt = int(parts[3])
+                            ALU_result = reg[rt_name] << shamt
+                        elif op_code == 'srl':
+                            rt_name = get_register_name(get_register_number(parts[2]))
+                            shamt = int(parts[3])
+                            ALU_result = reg[rt_name] >> shamt
+                        else:
+                            raise ValueError(f"Unsupported ALU operation {op_code}")
+                        if control_signals['RegWrite']:
+                            reg[rd_name] = ALU_result
+            except Exception as e:
+                print(f"Error executing instruction: {current_instruction} -> {e}")
+                break
 
-        if single_step:
-            display_registers(reg)
-            # Optionally display memory
-            # display_memory(memory)
-            print("PC after execution:", pc + 4)
-            input("Press Enter to continue...")
+            if single_step:
+                display_registers(reg)
+                # Optionally display memory
+                # display_memory(memory)
+                print("PC after execution:", pc + 4)
+                input("Press Enter to continue...")
 
-        pc += 4
+            pc += 4
 
     if not single_step:
         display_registers(reg)
